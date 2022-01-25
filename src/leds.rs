@@ -52,7 +52,6 @@ where
     fn caps_lock(&mut self, status: bool) {
         self.color.g = if status { 255 } else { 0 };
         self.ws.write(brightness(once(self.color), 32)).unwrap();
-
     }
 
     fn scroll_lock(&mut self, status: bool) {
