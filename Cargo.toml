@@ -15,6 +15,10 @@ embedded-time = "0.12.0"
 defmt-rtt = "0.3.1"
 panic-halt = "0.2.0"
 
+usb-device= "0.2.8"
+usbd-serial = "0.1.1"
+usbd-hid = "0.5.0"
+
 # Led support
 smart-leds = "0.3.0"
 # This revision supports rp2040 version 0.4.0
