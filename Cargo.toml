@@ -21,10 +21,10 @@ usbd-serial = "0.1.1"
 usbd-hid = "0.5.0"
 
 # Led support
-smart-leds = "0.3.0"
+# smart-leds = "0.3.0"
 # This revision supports rp2040 version 0.4.0
-ws2812-pio = { git = "https://github.com/ithinuel/ws2812-pio-rs", rev = "b126e70c23e192896caa38aa1a54d4877745fb1f", optional = true }
-nb = { version = "1.0.0", optional = true }
+# ws2812-pio = { git = "https://github.com/ithinuel/ws2812-pio-rs", rev = "b126e70c23e192896caa38aa1a54d4877745fb1f", optional = true }
+# nb = { version = "1.0.0", optional = true }
 
 # This revision supports boot2 by default
 adafruit-kb2040 = { git = "https://github.com/rp-rs/rp-hal", rev = "c180e7867b9463793c993a05e792c8ffb690d870", optional = true } # "0.1.0"
@@ -35,7 +35,7 @@ keyberon = { git = "https://github.com/TeXitoi/keyberon", rev = "58ac73cfcd09659
 
 [features]
 default = ["pico"]
-kb2040 = ["adafruit-kb2040", "ws2812-pio", "nb"]
+kb2040 = ["adafruit-kb2040" ] # , "ws2812-pio", "nb"]
 pico = ["rp-pico"]
 
 # cargo build/run
