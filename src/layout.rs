@@ -1,10 +1,8 @@
 use keyberon::action;
 use keyberon::action::Action;
-use keyberon::action::{k, l, HoldTapConfig};
+// use keyberon::action::{k, l, HoldTapConfig};
 use keyberon::key_code::KeyCode;
 use keyberon::key_code::KeyCode::*;
-
-pub enum CustomEvent {}
 
 #[allow(dead_code)]
 const CT_T: Action = action::m(&[KeyCode::LCtrl, KeyCode::Tab]);
