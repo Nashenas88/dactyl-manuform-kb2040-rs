@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use adafruit_kb2040 as bsp;
 use bsp::hal::gpio::bank0::Gpio17;
 use bsp::hal::gpio::{Function, Pin, PinId};
@@ -7,8 +9,7 @@ use bsp::pac::PIO0;
 use cortex_m::prelude::_embedded_hal_timer_CountDown;
 use embedded_time::duration::Extensions;
 use embedded_time::fixed_point::FixedPoint;
-
-use smart_leds::RGB8;
+use smart_leds::{SmartLedsWrite, RGB8};
 
 pub struct Ws2812 {
     tx: Tx<(PIO0, SM0)>,
@@ -74,15 +75,27 @@ impl Ws2812 {
 
         Self { tx, _pin: pin }
     }
+
+    pub fn writer<'a>(&'a mut self, timer: &'a Timer) -> Ws2812Writer<'a> {
+        Ws2812Writer { ws: self, timer }
+    }
 }
 
-impl Ws2812 {
-    pub(crate) fn write<T, J>(&mut self, timer: &Timer, iterator: T) -> Result<(), ()>
+pub struct Ws2812Writer<'a> {
+    ws: &'a mut Ws2812,
+    timer: &'a Timer,
+}
+
+impl<'a> SmartLedsWrite for Ws2812Writer<'a> {
+    type Error = ();
+    type Color = RGB8;
+
+    fn write<T, J>(&mut self, iterator: T) -> Result<(), ()>
     where
         T: Iterator<Item = J>,
         J: Into<RGB8>,
     {
-        let mut cd = timer.count_down();
+        let mut cd = self.timer.count_down();
         cd.start(60.microseconds());
         let _ = nb::block!(cd.wait());
 
@@ -91,7 +104,7 @@ impl Ws2812 {
             let word =
                 (u32::from(color.g) << 24) | (u32::from(color.r) << 16) | (u32::from(color.b) << 8);
 
-            while !self.tx.write(word) {
+            while !self.ws.tx.write(word) {
                 cortex_m::asm::nop();
             }
         }

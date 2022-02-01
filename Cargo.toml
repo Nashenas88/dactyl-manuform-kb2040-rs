@@ -17,7 +17,7 @@ defmt-rtt = "0.3.1"
 panic-halt = "0.2.0"
 
 usb-device= "0.2.8"
-usbd-serial = "0.1.1"
+usbd-serial = { version = "0.1.1", optional = true }
 usbd-hid = "0.5.0"
 
 # Led support
@@ -39,6 +39,7 @@ keyberon = { git = "https://github.com/TeXitoi/keyberon", rev = "58ac73cfcd09659
 default = ["pico"]
 kb2040 = ["adafruit-kb2040", "ws2812-pio", "nb"]
 pico = ["rp-pico"]
+serial-comms = ["usbd-serial"]
 
 # cargo build/run
 [profile.dev]

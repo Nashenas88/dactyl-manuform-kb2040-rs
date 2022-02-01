@@ -1,4 +1,3 @@
-use adafruit_kb2040 as bsp;
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 use keyberon::matrix::PressedKeys;
 

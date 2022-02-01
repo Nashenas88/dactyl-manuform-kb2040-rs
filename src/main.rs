@@ -13,8 +13,12 @@ use adafruit_kb2040 as bsp;
 #[cfg(feature = "rp-pico")]
 use rp_pico as bsp;
 
+#[cfg(feature = "serial-comms")]
+use crate::fmt::Wrapper;
+use crate::ws2812::Ws2812;
 use bsp::hal::clocks::init_clocks_and_plls;
 use bsp::hal::gpio::DynPin;
+use bsp::hal::gpio::OutputSlewRate;
 use bsp::hal::pio::PIOExt;
 use bsp::hal::timer::Timer;
 use bsp::hal::usb::UsbBus;
@@ -22,23 +26,27 @@ use bsp::hal::watchdog::Watchdog;
 use bsp::hal::Clock;
 use bsp::hal::Sio;
 use bsp::XOSC_CRYSTAL_FREQ;
+#[cfg(feature = "serial-comms")]
 use core::fmt::Write;
-use embedded_hal::digital::v2::InputPin;
 use embedded_hal::prelude::*;
 use embedded_time::duration::Extensions;
 use keyberon::debounce::Debouncer;
 use keyberon::key_code;
 use keyberon::layout::Layout;
-use keyberon::matrix::{Matrix, PressedKeys};
+use keyberon::matrix::PressedKeys;
 use panic_halt as _;
-use smart_leds::SmartLedsWrite;
 use usb_device::class::UsbClass;
 use usb_device::class_prelude::UsbBusAllocator;
 use usb_device::device::UsbDeviceState;
+#[cfg(feature = "serial-comms")]
+use usb_device::device::{UsbDeviceBuilder, UsbVidPid};
+#[cfg(feature = "serial-comms")]
 use usbd_serial::SerialPort;
 
+#[allow(dead_code)]
 static mut USB_BUS: Option<UsbBusAllocator<bsp::hal::usb::UsbBus>> = None;
 
+#[cfg(feature = "serial-comms")]
 mod fmt;
 mod layout;
 mod matrix;
@@ -47,83 +55,30 @@ mod ws2812;
 #[rtic::app(device = bsp::pac, peripherals = true, dispatchers = [PIO0_IRQ_0])]
 mod app {
 
-    use crate::{fmt::Wrapper, ws2812::Ws2812};
-    use bsp::hal::gpio::OutputSlewRate;
-    use core::iter::once;
-    use smart_leds::{brightness, RGB8};
-    use usb_device::device::{UsbDeviceBuilder, UsbVidPid};
-
     use super::*;
 
-    const OFF: RGB8 = RGB8 { r: 0, g: 0, b: 0 };
-    const RED: RGB8 = RGB8 { r: 255, g: 0, b: 0 };
-    const GREEN: RGB8 = RGB8 { r: 0, g: 255, b: 0 };
-    const BLUE: RGB8 = RGB8 { r: 0, g: 0, b: 255 };
-    const YELLOW: RGB8 = RGB8 {
-        r: 255,
-        g: 255,
-        b: 0,
-    };
-    const BLACK: RGB8 = RGB8 {
-        r: 50,
-        g: 50,
-        b: 50,
-    };
-    const WHITE: RGB8 = RGB8 {
-        r: 255,
-        g: 255,
-        b: 255,
-    };
     const NCOLS: usize = 6;
     const NROWS: usize = 7;
-    const COL_COLORS: [RGB8; NCOLS] = [YELLOW, GREEN, BLUE, BLACK, WHITE, RED];
-    const ROW_COLORS: [RGB8; NROWS] = [YELLOW, GREEN, BLUE, BLACK, WHITE, RED, GREEN];
     const SCAN_TIME_US: u32 = 1000;
-    const COLOR_TIME_US: u32 = 1_000_000;
     static mut USB_BUS: Option<usb_device::bus::UsbBusAllocator<bsp::hal::usb::UsbBus>> = None;
-
-    pub struct Index {
-        x: u8,
-        y: u8,
-    }
-
-    #[derive(Copy, Clone)]
-    pub enum ColorState {
-        Col,
-        OffBetween,
-        Row,
-        Off,
-    }
-
-    impl ColorState {
-        fn next(&self) -> Self {
-            match self {
-                ColorState::Col => ColorState::OffBetween,
-                ColorState::OffBetween => ColorState::Row,
-                ColorState::Row => ColorState::Off,
-                ColorState::Off => ColorState::Col,
-            }
-        }
-    }
 
     #[shared]
     struct Shared {
-        serial: SerialPort<'static, bsp::hal::usb::UsbBus>,
+        // #[cfg(feature = "serial-comms")]
+        // serial: SerialPort<'static, bsp::hal::usb::UsbBus>,
         usb_dev: usb_device::device::UsbDevice<'static, bsp::hal::usb::UsbBus>,
-        // usb_class: keyberon::hid::HidClass<
-        //     'static,
-        //     bsp::hal::usb::UsbBus,
-        //     keyberon::keyboard::Keyboard<()>,
-        // >,
+        usb_class: keyberon::hid::HidClass<
+            'static,
+            bsp::hal::usb::UsbBus,
+            keyberon::keyboard::Keyboard<()>,
+        >,
         timer: bsp::hal::timer::Timer,
         alarm: bsp::hal::timer::Alarm0,
-        alarm1: bsp::hal::timer::Alarm1,
         #[lock_free]
-        color_state: ColorState,
+        last_report: Option<[u8; 8]>,
         #[lock_free]
         watchdog: bsp::hal::watchdog::Watchdog,
         ws: ws2812::Ws2812,
-        index: Option<Index>,
         #[lock_free]
         matrix: matrix::Matrix<DynPin, DynPin, NCOLS, NROWS>,
         layout: Layout,
@@ -145,9 +100,6 @@ mod app {
     /// the colour wheel in an infinite loop.
     #[init]
     fn init(c: init::Context) -> (Shared, Local, init::Monotonics) {
-        // Configure the RP2040 peripherals
-        // let pac = take();
-
         let mut watchdog = Watchdog::new(c.device.WATCHDOG);
         let mut resets = c.device.RESETS;
 
@@ -250,10 +202,6 @@ mod app {
         let _ = alarm.schedule(SCAN_TIME_US.microseconds());
         alarm.enable_interrupt(&mut timer);
 
-        let mut alarm1 = timer.alarm_1().unwrap();
-        let _ = alarm1.schedule(COLOR_TIME_US.microseconds());
-        alarm1.enable_interrupt(&mut timer);
-
         let usb_bus = UsbBusAllocator::new(UsbBus::new(
             c.device.USBCTRL_REGS,
             c.device.USBCTRL_DPRAM,
@@ -266,36 +214,36 @@ mod app {
             USB_BUS = Some(usb_bus);
         }
 
+        #[cfg(feature = "serial-comms")]
         let serial = SerialPort::new(unsafe { USB_BUS.as_ref().unwrap() });
 
-        // let usb_class = keyberon::new_class(unsafe { USB_BUS.as_ref().unwrap() }, ());
-        // let usb_dev = keyberon::new_device(unsafe { USB_BUS.as_ref().unwrap() });
-        let usb_dev = UsbDeviceBuilder::new(
-            unsafe { USB_BUS.as_ref().unwrap() },
-            UsbVidPid(0x16c0, 0x27dd),
-        )
-        .manufacturer("Fake company")
-        .product("Serial port")
-        .serial_number("TEST")
-        .device_class(2)
-        .build();
+        let usb_class = keyberon::new_class(unsafe { USB_BUS.as_ref().unwrap() }, ());
+        let usb_dev = keyberon::new_device(unsafe { USB_BUS.as_ref().unwrap() });
+        // let usb_dev = UsbDeviceBuilder::new(
+        //     unsafe { USB_BUS.as_ref().unwrap() },
+        //     UsbVidPid(0x16c0, 0x27dd),
+        // )
+        // .manufacturer("Fake company")
+        // .product("Serial port")
+        // .serial_number("TEST")
+        // .device_class(2)
+        // .build();
 
         // Start watchdog and feed it with the lowest priority task at 1000hz
         watchdog.start(10_000.microseconds());
 
         (
             Shared {
-                serial,
-                // usb_class,
+                // #[cfg(feature = "serial-comms")]
+                // serial,
+                usb_class,
                 usb_dev,
                 timer,
                 alarm,
-                alarm1,
-                color_state: ColorState::Col,
                 watchdog,
                 matrix,
+                last_report: None,
                 ws,
-                index: None,
                 layout,
                 debouncer,
                 transform,
@@ -306,41 +254,7 @@ mod app {
         )
     }
 
-    fn update_index(
-        ser: &mut SerialPort<'static, bsp::hal::usb::UsbBus>,
-        s: &str,
-    ) -> Result<Index, &'static str> {
-        let mut format_buf = [0u8; 64];
-        let _ = write!(
-            Wrapper::new(&mut format_buf),
-            "Parsing: ({})\"{}\"",
-            s.len(),
-            s
-        );
-        write_serial(ser, core::str::from_utf8(&format_buf).unwrap());
-        // format `u8,u8\n`
-        if !s.ends_with('\n') {
-            return Err("Missing newline");
-        }
-        let mut parts = s.split(',').map(|c| c.trim_end_matches('\n').parse::<u8>());
-        let x = parts
-            .next()
-            .ok_or("missing x")?
-            .map_err(|_| "x parse err")?;
-        let y = parts
-            .next()
-            .ok_or("missing y")?
-            .map_err(|_| "y parse err")?;
-
-        if x as usize >= NROWS {
-            return Err("row too high");
-        }
-        if y as usize >= NCOLS {
-            return Err("col too high");
-        }
-        Ok(Index { x, y })
-    }
-
+    #[cfg(feature = "serial-comms")]
     fn write_serial(s: &mut SerialPort<'static, bsp::hal::usb::UsbBus>, buf: &str) {
         let buf = buf.as_bytes();
         let mut write_ptr = &buf[..];
@@ -355,102 +269,107 @@ mod app {
         let _ = s.write("\n".as_bytes());
     }
 
-    #[task(binds = USBCTRL_IRQ, priority = 3, shared = [serial, usb_dev/*, usb_class*/, index, /*matrix*/])]
+    #[task(binds = USBCTRL_IRQ, priority = 3, shared = [/*serial, */usb_dev, usb_class])]
     fn usb_rx(c: usb_rx::Context) {
         let usb_d = c.shared.usb_dev;
-        // let usb_c = c.shared.usb_class;
-        let serial = c.shared.serial;
-        let index = c.shared.index;
-        // let matrix = c.shared.matrix;
-        (usb_d, serial, index /*matrix*/).lock(|d, s, i /*, m*/| {
-            // (serial, usb_c).lock(|s, c| {
-            // if d.poll(&mut [c, s]) {
-            // c.poll();
-            // s.poll();
-            if d.poll(&mut [s]) {
-                let mut buf = [0u8; 64];
-                match s.read(&mut buf) {
-                    Err(_e) => {
-                        // do nothing... nowhere to log
-                    }
-                    Ok(0) => {
-                        // nothing to read
-                    }
-                    Ok(count) => {
-                        match core::str::from_utf8(&buf[..count]).map_err(|_| "utf 8 parse err") {
-                            Err(e) => write_serial(s, e),
-                            Ok(st) => {
-                                if let Some(index) =
-                                    update_index(s, st).map_err(|e| write_serial(s, e)).ok()
-                                {
-                                    *i = Some(index);
-                                }
-                                if let Some(Index { y, x }) = i {
-                                    // let _ = m.clear();
-                                    let mut buf = [0u8; 32];
-                                    let _ = write!(
-                                        Wrapper::new(&mut buf),
-                                        "Index{{ x: {}, y: {} }}",
-                                        x,
-                                        y
-                                    );
-                                    write_serial(s, core::str::from_utf8(&buf).unwrap());
-                                    // let _ = m.set_row_low(*y as usize);
-                                }
-                                // buf.iter_mut().take(count).for_each(|b| {
-                                //     b.make_ascii_uppercase();
-                                // });
-                            }
-                        }
-                    }
-                }
-            }
-        });
+        let usb_c = c.shared.usb_class;
+        // #[cfg(feature = "serial-comms")]
+        // let serial = c.shared.serial;
+        (
+            usb_d, usb_c,
+            // serial,
+        )
+            .lock(
+                |d,
+                 c,
+                //  s
+                 | {
+                    let _ = d.poll(&mut [c]);
+                    // #[cfg(feature="serial-comms")]
+                    // if d.poll(&mut [s]) {
+                    //     let mut buf = [0u8; 64];
+                    //     loop {
+                    //         if let Err(_) | Ok(0) = s.read(&mut buf) {
+                    //             break;
+                    //         }
+                    //     }
+                    // }
+                },
+            );
     }
 
-    #[task(priority = 2, capacity = 8, shared = [usb_dev, /*usb_class,*/ layout, serial])]
+    #[task(priority = 2, capacity = 8, shared = [usb_dev, usb_class, layout, /*serial, last_report*/])]
     fn handle_event(mut c: handle_event::Context, event: Option<keyberon::layout::Event>) {
-        let mut serial = c.shared.serial;
-        serial.lock(|s| {
-            let mut buf = [0u8; 32];
-            if let Some(e) = &event {
-                match e {
-                    keyberon::layout::Event::Press(x, y) => {
-                        let _ = write!(Wrapper::new(&mut buf), "Press: {}, {}\n", x, y);
-                    }
-                    keyberon::layout::Event::Release(x, y) => {
-                        let _ = write!(Wrapper::new(&mut buf), "Release: {}, {}\n", x, y);
-                    }
-                }
-            }
-            let _ = s.write(&buf);
-        });
+        // let mut serial = c.shared.serial;
+        // #[cfg(feature = "serial-comms")]
+        // {
+        //     serial.lock(|s| {
+        //         let mut buf = [0u8; 32];
+        //         if let Some(e) = &event {
+        //             match e {
+        //                 keyberon::layout::Event::Press(x, y) => {
+        //                     let _ = write!(Wrapper::new(&mut buf), "Press: {}, {}\n", x, y);
+        //                 }
+        //                 keyberon::layout::Event::Release(x, y) => {
+        //                     let _ = write!(Wrapper::new(&mut buf), "Release: {}, {}\n", x, y);
+        //                 }
+        //             }
+        //         }
+        //         let _ = s.write(&buf);
+        //     });
+        // }
         if let Some(e) = event {
             // TODO: Support Uf2 for the side not performing USB HID
             // The right side only passes None here and buffers the keys
             // for USB to send out when polled by the host
-            c.shared.layout.lock(|l| l.event(e));
+            c.shared
+                .layout
+                .lock(|l: &mut keyberon::layout::Layout| l.event(e));
             return;
         };
 
-        let _report: key_code::KbHidReport = c.shared.layout.lock(|l| l.keycodes().collect());
-        // if !c
-        //     .shared
-        //     .usb_class
-        //     .lock(|k| k.device_mut().set_keyboard_report(report.clone()))
-        // {
-        //     return;
+        let report: key_code::KbHidReport = c.shared.layout.lock(|l| {
+            l.tick();
+            l.keycodes().collect()
+        });
+        // if Some(report.as_bytes()) != c.shared.last_report.as_ref().map(|b| &b[..]) {
+        //     let mut buf = [0u8; 128];
+        //     let _ = write!(
+        //         Wrapper::new(&mut buf),
+        //         "o:{:?}\nn:{:?}\n",
+        //         c.shared.last_report,
+        //         report
+        //     );
+        //     serial.lock(|s| {
+        //         let _ = s.write(&buf);
+        //     });
+
+        //     match c.shared.last_report.as_mut() {
+        //         Some(l) => l.clone_from_slice(report.as_bytes()),
+        //         None => {
+        //             let mut l = [0u8; 8];
+        //             l.clone_from_slice(report.as_bytes());
+        //             *c.shared.last_report = Some(l);
+        //         }
+        //     }
         // }
-        // if c.shared.usb_dev.lock(|d| d.state()) != UsbDeviceState::Configured {
-        //     return;
-        // }
-        // while let Ok(0) = c.shared.usb_class.lock(|k| k.write(report.as_bytes())) {}
+        if !c
+            .shared
+            .usb_class
+            .lock(|k| k.device_mut().set_keyboard_report(report.clone()))
+        {
+            return;
+        }
+        if c.shared.usb_dev.lock(|d| d.state()) != UsbDeviceState::Configured {
+            return;
+        }
+        while let Ok(0) = c.shared.usb_class.lock(|k| k.write(report.as_bytes())) {}
     }
 
     #[task(
         binds = TIMER_IRQ_0,
         priority = 1,
-        shared = [index, matrix, debouncer, watchdog, timer, alarm, &transform, &is_right],
+        shared = [matrix, debouncer, watchdog, timer, alarm, &transform, &is_right],
     )]
     fn scan_timer_irq(c: scan_timer_irq::Context) {
         let timer = c.shared.timer;
@@ -458,109 +377,54 @@ mod app {
         (timer, alarm).lock(|t, a| {
             a.clear_interrupt(t);
             let _ = a.schedule(SCAN_TIME_US.microseconds());
-            // ws.write(t, brightness(once(RGB8 { r: 255, g: 0, b: 0 }), 32))
-            //     .unwrap()
         });
 
         c.shared.watchdog.feed();
 
-        // let mut index = c.shared.index;
         let matrix = c.shared.matrix;
-        // index.lock(|i| {
-        //     if i.is_none() {
-        //         return;
-        //     }
-        // let Index { x, y: _ } = i.as_ref().unwrap();
         let keys_pressed = matrix.get().unwrap();
-        // let mut keys_pressed = PressedKeys::default();
-        // for y in 0..NCOLS {
-        //     (keys_pressed.0[*x as usize])[y] = m.is_col_low(y).unwrap();
-        // }
         let deb_events = c
             .shared
             .debouncer
             .events(keys_pressed)
             .map(c.shared.transform);
-        for event in deb_events {
-            handle_event::spawn(Some(event)).unwrap();
-        }
 
-        // let keys_pressed = c.shared.matrix.lock(|m| m.is_col_low().unwrap());
-        // let mut deb_events = c
-        //     .shared
-        //     .debouncer
-        //     .events(keys_pressed)
-        //     .map(c.shared.transform)
-        //     .peekable();
-
-        // if *c.shared.is_right {
-        //     for event in deb_events {
-        //         handle_event::spawn(Some(event)).unwrap();
-        //     }
-        //     handle_event::spawn(None).unwrap();
-        // }
-        // });
-        /*else {
-            // coordinate and press/release is encoded in a single byte
-            // the first 6 bits are the coordinate and therefore cannot go past 63
-            // The last bit is to signify if it is the last byte to be sent, but
-            // this is not currently used as serial rx is the highest priority
-            // end? press=1/release=0 key_number
-            //   7         6            543210
-            let mut es: [Option<keyberon::layout::Event>; 16] = [None; 16];
-            for (i, e) in deb_events.enumerate() {
-                es[i] = Some(e);
+        if *c.shared.is_right {
+            for event in deb_events {
+                handle_event::spawn(Some(event)).unwrap();
             }
-            let stop_index = es.iter().position(|&v| v == None).unwrap();
-            for i in 0..(stop_index + 1) {
-                let mut byte: u8;
-                if let Some(ev) = es[i] {
-                    if ev.coord().1 <= 0b0011_1111 {
-                        byte = ev.coord().1;
-                    } else {
-                        byte = 0b0011_1111;
-                    }
-                    byte |= (ev.is_press() as u8) << 6;
-                    if i == stop_index + 1 {
-                        byte |= 0b1000_0000;
-                    }
-                    // Watchdog will catch any possibility for an infinite loop
-                    // while c.shared.uart.lock(|u| u.uartfr.read().txff().bit_is_set()) {}
-                    // c.shared
-                    //     .uart
-                    //     .lock(|u| u.uartdr.write(|w| unsafe { w.data().bits(byte) }));
-                }
-            }
-        } */
-    }
-
-    #[task(
-        binds = TIMER_IRQ_1,
-        priority = 1,
-        shared = [index, timer, alarm1, ws, color_state],
-    )]
-    fn color_timer_irq(c: color_timer_irq::Context) {
-        let mut timer = c.shared.timer;
-        let alarm1 = c.shared.alarm1;
-        (&mut timer, alarm1).lock(|t, a| {
-            a.clear_interrupt(t);
-            let _ = a.schedule(COLOR_TIME_US.microseconds());
-            // ws.write(t, brightness(once(RGB8 { r: 255, g: 0, b: 0 }), 32))
-            //     .unwrap()
-        });
-
-        let ws = c.shared.ws;
-        let index = c.shared.index;
-        let color_state = c.shared.color_state;
-
-        (timer, index, ws).lock(|t, i, w| {
-            let color = match (i, &color_state) {
-                (None, _) | (_, ColorState::OffBetween) | (_, ColorState::Off) => OFF,
-                (Some(Index { y, .. }), ColorState::Col) => COL_COLORS[(*y) as usize],
-                (Some(Index { x, .. }), ColorState::Row) => ROW_COLORS[(*x) as usize],
-            };
-            let _ = w.write(t, brightness(once(color), 32));
-            *color_state = color_state.next();
-        });
+            handle_event::spawn(None).unwrap();
+        } /* else {
+              // coordinate and press/release is encoded in a single byte
+              // the first 6 bits are the coordinate and therefore cannot go past 63
+              // The last bit is to signify if it is the last byte to be sent, but
+              // this is not currently used as serial rx is the highest priority
+              // end? press=1/release=0 key_number
+              //   7         6            543210
+              let mut es: [Option<keyberon::layout::Event>; 16] = [None; 16];
+              for (i, e) in deb_events.enumerate() {
+                  es[i] = Some(e);
+              }
+              let stop_index = es.iter().position(|&v| v == None).unwrap();
+              for i in 0..(stop_index + 1) {
+                  let mut byte: u8;
+                  if let Some(ev) = es[i] {
+                      if ev.coord().1 <= 0b0011_1111 {
+                          byte = ev.coord().1;
+                      } else {
+                          byte = 0b0011_1111;
+                      }
+                      byte |= (ev.is_press() as u8) << 6;
+                      if i == stop_index + 1 {
+                          byte |= 0b1000_0000;
+                      }
+                      // Watchdog will catch any possibility for an infinite loop
+                      // while c.shared.uart.lock(|u| u.uartfr.read().txff().bit_is_set()) {}
+                      // c.shared
+                      //     .uart
+                      //     .lock(|u| u.uartdr.write(|w| unsafe { w.data().bits(byte) }));
+                  }
+              }
+          } */
     }
 }
