@@ -17,11 +17,8 @@ cargo run --release
     <li><a href="#installation-of-development-dependencies">Installation of development dependencies</a></li>
     <li><a href="#running">Running</a></li>
     <li><a href="#alternative-runners">Alternative runners</a></li>
-    <li><a href="#roadmap">Roadmap</a></li>
-    <li><a href="#contributing">Contributing</a></li>
-    <li><a href="#code-of-conduct">Code of conduct</a></li>
     <li><a href="#license">License</a></li>
-    <li><a href="#contact">Contact</a></li>
+    <li><a href="#template">Template</a></li>
   </ol>
 </details>
 
@@ -98,7 +95,9 @@ Some of the options for your `runner` are listed below:
 
 </details>
 
-## License
+<!-- License -->
+<details open="open">
+  <summary><h2 style="display: inline-block" id="license">License</h2></summary>
 
 The contents of this repository are dual-licensed under the _MIT OR Apache
 2.0_ License. That means you can chose either the MIT licence or the
@@ -107,7 +106,10 @@ information on each specific licence.
 
 Any submissions to this project (e.g. as Pull Requests) must be made available
 under these terms.
+</details>
 
-## Template
+<!-- Template -->
+<h2 style="display: inline-block" id="template">Template</h2>
+
 
 This project was generated with [https://github.com/rp-rs/rp2040-project-template](https://github.com/rp-rs/rp2040-project-template)
