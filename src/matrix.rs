@@ -1,3 +1,6 @@
+//! A modified version of Keyberon's matrix mod that includes delays between
+//! the row check to fix a timing issue on the kb2040.
+
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 use keyberon::matrix::PressedKeys;
 
@@ -41,12 +44,16 @@ where
     {
         let mut keys = PressedKeys::default();
 
-        for (ri, row) in (&mut self.rows).iter_mut().enumerate() {
+        for (ri, row) in self.rows.iter_mut().enumerate() {
             row.set_low()?;
-            // Delay to let signal propagate.
+            // Delay to let signal propagate. Without this, the previous row
+            // signal might still be low while the current row is low, and two
+            // presses on the same column get registered for a single key press.
             cortex_m::asm::delay(100);
+
+            // TODO: Read all pins at once to speed this section up.
             // let pins = unsafe { &(*bsp::pac::SIO::ptr()).gpio_in.read().bits() };
-            for (ci, col) in (&self.cols).iter().enumerate() {
+            for (ci, col) in self.cols.iter().enumerate() {
                 if col.is_low()? {
                     keys.0[ri][ci] = true;
                 }
@@ -54,20 +61,5 @@ where
             row.set_high()?;
         }
         Ok(keys)
-    }
-
-    pub fn set_row_low<E>(&mut self, y: usize) -> Result<(), E>
-    where
-        R: OutputPin<Error = E>,
-    {
-        self.rows[y].set_low()
-    }
-
-    pub fn is_col_low<E>(&mut self, x: usize) -> Result<bool, E>
-    where
-        C: InputPin<Error = E>,
-        R: OutputPin<Error = E>,
-    {
-        self.cols[x].is_low()
     }
 }

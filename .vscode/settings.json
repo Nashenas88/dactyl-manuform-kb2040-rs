@@ -1,8 +1,5 @@
 {
     "rust-analyzer.cargo.target": "thumbv6m-none-eabi",
     "rust-analyzer.checkOnSave.allTargets": false,
-    "rust-analyzer.cargo.features": ["kb2040"],
-    "rust-analyzer.cargo.noDefaultFeatures": true,
-    "rust-analyzer.checkOnSave.features": ["kb2040"],
     "editor.formatOnSave": true
 }

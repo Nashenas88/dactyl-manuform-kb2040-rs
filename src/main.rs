@@ -1,24 +1,16 @@
-//! # Rainbow Example for the Adafruit KB2040
-//!
-//! Runs a rainbow-effect colour wheel on the on-board LED.
-//!
-//! Uses the `ws2812_pio` driver to control the LED, which in turns uses the
-//! RP2040's PIO block.
+//! Keyboard firmware for Dactyl-Manuform 6x6 layout on an Adafruit kb2040.
 
 #![no_std]
 #![no_main]
-
-#[cfg(feature = "kb2040")]
-use adafruit_kb2040 as bsp;
-#[cfg(feature = "rp-pico")]
-use rp_pico as bsp;
+// Should just be for the `ws` in Shared, but rtic proc macros don't support attributes =/
+#![allow(dead_code)]
 
 #[cfg(feature = "serial-comms")]
 use crate::fmt::Wrapper;
 use crate::ws2812::Ws2812;
+use adafruit_kb2040 as bsp;
 use bsp::hal::clocks::init_clocks_and_plls;
 use bsp::hal::gpio::DynPin;
-use bsp::hal::gpio::OutputSlewRate;
 use bsp::hal::pio::PIOExt;
 use bsp::hal::timer::Timer;
 use bsp::hal::usb::UsbBus;
@@ -35,7 +27,6 @@ use keyberon::key_code;
 use keyberon::layout::Layout;
 use keyberon::matrix::PressedKeys;
 use panic_halt as _;
-use usb_device::class::UsbClass;
 use usb_device::class_prelude::UsbBusAllocator;
 use usb_device::device::UsbDeviceState;
 #[cfg(feature = "serial-comms")]
@@ -43,22 +34,30 @@ use usb_device::device::{UsbDeviceBuilder, UsbVidPid};
 #[cfg(feature = "serial-comms")]
 use usbd_serial::SerialPort;
 
-#[allow(dead_code)]
-static mut USB_BUS: Option<UsbBusAllocator<bsp::hal::usb::UsbBus>> = None;
-
 #[cfg(feature = "serial-comms")]
 mod fmt;
 mod layout;
 mod matrix;
 mod ws2812;
 
+// Rtic entry point. Uses the kb2040's Peripheral Access API (pac), and uses the
+// PIO0_IRQ_0 interrupt to dispatch to the handlers.
 #[rtic::app(device = bsp::pac, peripherals = true, dispatchers = [PIO0_IRQ_0])]
 mod app {
-
     use super::*;
 
+    /// The number of times a switch needs to be in the same state for the
+    /// debouncer to consider it a press.
+    const DEBOUNCER_MIN_STATE_COUNT: u16 = 30;
+
+    /// The number of columns on the keyboard.
     const NCOLS: usize = 6;
+
+    /// The number of rows on the keyboard.
     const NROWS: usize = 7;
+
+    /// The amount of time between each scan of the matrix for switch presses.
+    /// This is always the time from the *start* of the previous scan.
     const SCAN_TIME_US: u32 = 1000;
     static mut USB_BUS: Option<usb_device::bus::UsbBusAllocator<bsp::hal::usb::UsbBus>> = None;
 
@@ -75,8 +74,6 @@ mod app {
         timer: bsp::hal::timer::Timer,
         alarm: bsp::hal::timer::Alarm0,
         #[lock_free]
-        last_report: Option<[u8; 8]>,
-        #[lock_free]
         watchdog: bsp::hal::watchdog::Watchdog,
         ws: ws2812::Ws2812,
         #[lock_free]
@@ -91,13 +88,7 @@ mod app {
     #[local]
     struct Local {}
 
-    /// Entry point to our bare-metal application.
-    ///
-    /// The `#[entry]` macro ensures the Cortex-M start-up code calls this
-    /// function as soon as all global variables are initialised.
-    ///
-    /// The function configures the RP2040 peripherals, then the LED, then runs
-    /// the colour wheel in an infinite loop.
+    /// Setup for the keyboard.
     #[init]
     fn init(c: init::Context) -> (Shared, Local, init::Monotonics) {
         let mut watchdog = Watchdog::new(c.device.WATCHDOG);
@@ -116,7 +107,6 @@ mod app {
         .unwrap();
 
         let sio = Sio::new(c.device.SIO);
-
         let pins = bsp::Pins::new(
             c.device.IO_BANK0,
             c.device.PADS_BANK0,
@@ -131,23 +121,13 @@ mod app {
         let col5 = pins.d6;
         let col6 = pins.d7;
 
-        let mut row1 = pins.d8;
-        let mut row2 = pins.d9;
-        let mut row3 = pins.d10;
-        let mut row4 = pins.a0;
-        let mut row5 = pins.a1;
-        let mut row6 = pins.a2;
-        let mut row7 = pins.a3;
-
-        // Set the row slew rates fast so the matrix doesn't need to delay
-        // between row checks.
-        row1.set_slew_rate(OutputSlewRate::Fast);
-        row2.set_slew_rate(OutputSlewRate::Fast);
-        row3.set_slew_rate(OutputSlewRate::Fast);
-        row4.set_slew_rate(OutputSlewRate::Fast);
-        row5.set_slew_rate(OutputSlewRate::Fast);
-        row6.set_slew_rate(OutputSlewRate::Fast);
-        row7.set_slew_rate(OutputSlewRate::Fast);
+        let row1 = pins.d8;
+        let row2 = pins.d9;
+        let row3 = pins.d10;
+        let row4 = pins.a0;
+        let row5 = pins.a1;
+        let row6 = pins.a2;
+        let row7 = pins.a3;
 
         let mut timer = Timer::new(c.device.TIMER, &mut resets);
         let (mut pio, sm0, _, _, _) = c.device.PIO0.split(&mut resets);
@@ -160,16 +140,23 @@ mod app {
         );
 
         // let side = pins.rx.into_floating_input();
+        // When other side built, this will be needed to ensure both keyboard halves
+        // have finished their startup, and the pin signal can be used to determine the
+        // keyboard side.
         cortex_m::asm::delay(1000);
 
         let is_right = true; //side.is_high().unwrap();
 
+        // Map the keys on the right side of the keyboard since the wiring will be reversed across
+        // the columns.
         let transform: fn(keyberon::layout::Event) -> keyberon::layout::Event = if is_right {
             |e| e.transform(|i: u8, j: u8| -> (u8, u8) { (i, 11 - j) })
         } else {
             |e| e
         };
 
+        // Build the matrix that will inform which specific combinations of row and col switches
+        // are being pressed.
         let matrix: matrix::Matrix<DynPin, DynPin, NCOLS, NROWS> =
             cortex_m::interrupt::free(move |_cs| {
                 matrix::Matrix::new(
@@ -194,14 +181,23 @@ mod app {
             })
             .unwrap();
 
+        // Load the defined layout which is used later to map the matrix to specific keycodes.
         let layout = Layout::new(layout::LAYERS);
+        // The debouncer prevents very tiny bounces from being registered as multiple switch
+        // presses.
         let debouncer: keyberon::debounce::Debouncer<keyberon::matrix::PressedKeys<NCOLS, NROWS>> =
-            Debouncer::new(PressedKeys::default(), PressedKeys::default(), 30);
+            Debouncer::new(
+                PressedKeys::default(),
+                PressedKeys::default(),
+                DEBOUNCER_MIN_STATE_COUNT,
+            );
 
+        // The alarm used to trigger the matrix scan.
         let mut alarm = timer.alarm_0().unwrap();
         let _ = alarm.schedule(SCAN_TIME_US.microseconds());
         alarm.enable_interrupt(&mut timer);
 
+        // The bus that is used to manage the device and class below.
         let usb_bus = UsbBusAllocator::new(UsbBus::new(
             c.device.USBCTRL_REGS,
             c.device.USBCTRL_DPRAM,
@@ -210,6 +206,8 @@ mod app {
             &mut resets,
         ));
 
+        // We store the bus in a static to make the borrows satisfy the rtic model, since rtic
+        // needs all references to be 'static.
         unsafe {
             USB_BUS = Some(usb_bus);
         }
@@ -217,8 +215,12 @@ mod app {
         #[cfg(feature = "serial-comms")]
         let serial = SerialPort::new(unsafe { USB_BUS.as_ref().unwrap() });
 
+        // The class which specifies this device supports HID Keyboard reports.
         let usb_class = keyberon::new_class(unsafe { USB_BUS.as_ref().unwrap() }, ());
+        // The device which represents the device to the system as being a "Keyberon"
+        // keyboard.
         let usb_dev = keyberon::new_device(unsafe { USB_BUS.as_ref().unwrap() });
+        // The fake modem device used to generate a serial connection to the host.
         // let usb_dev = UsbDeviceBuilder::new(
         //     unsafe { USB_BUS.as_ref().unwrap() },
         //     UsbVidPid(0x16c0, 0x27dd),
@@ -242,7 +244,6 @@ mod app {
                 alarm,
                 watchdog,
                 matrix,
-                last_report: None,
                 ws,
                 layout,
                 debouncer,
@@ -254,6 +255,7 @@ mod app {
         )
     }
 
+    /// Helper function to ensure all data is written across the serial interface.
     #[cfg(feature = "serial-comms")]
     fn write_serial(s: &mut SerialPort<'static, bsp::hal::usb::UsbBus>, buf: &str) {
         let buf = buf.as_bytes();
@@ -269,6 +271,7 @@ mod app {
         let _ = s.write("\n".as_bytes());
     }
 
+    /// Usb interrupt handler. Runs every time the host requests new data.
     #[task(binds = USBCTRL_IRQ, priority = 3, shared = [/*serial, */usb_dev, usb_class])]
     fn usb_rx(c: usb_rx::Context) {
         let usb_d = c.shared.usb_dev;
@@ -284,7 +287,11 @@ mod app {
                  c,
                 //  s
                  | {
+                    // No need to poll the class since that's already being done by the device in
+                    // its `poll` method.
                     let _ = d.poll(&mut [c]);
+                    // Read the serial data otherwise the serial interface is considered broken
+                    // by the host.
                     // #[cfg(feature="serial-comms")]
                     // if d.poll(&mut [s]) {
                     //     let mut buf = [0u8; 64];
@@ -298,61 +305,24 @@ mod app {
             );
     }
 
-    #[task(priority = 2, capacity = 8, shared = [usb_dev, usb_class, layout, /*serial, last_report*/])]
+    /// Process events for the layout then generate and send the Keyboard HID Report.
+    #[task(priority = 2, capacity = 8, shared = [usb_dev, usb_class, layout])]
     fn handle_event(mut c: handle_event::Context, event: Option<keyberon::layout::Event>) {
-        // let mut serial = c.shared.serial;
-        // #[cfg(feature = "serial-comms")]
-        // {
-        //     serial.lock(|s| {
-        //         let mut buf = [0u8; 32];
-        //         if let Some(e) = &event {
-        //             match e {
-        //                 keyberon::layout::Event::Press(x, y) => {
-        //                     let _ = write!(Wrapper::new(&mut buf), "Press: {}, {}\n", x, y);
-        //                 }
-        //                 keyberon::layout::Event::Release(x, y) => {
-        //                     let _ = write!(Wrapper::new(&mut buf), "Release: {}, {}\n", x, y);
-        //                 }
-        //             }
-        //         }
-        //         let _ = s.write(&buf);
-        //     });
-        // }
+        // If there's an event, process it with the layout and return early. We use `None`
+        // to signify that the current scan is done with its events.
         if let Some(e) = event {
-            // TODO: Support Uf2 for the side not performing USB HID
-            // The right side only passes None here and buffers the keys
-            // for USB to send out when polled by the host
-            c.shared
-                .layout
-                .lock(|l: &mut keyberon::layout::Layout| l.event(e));
+            c.shared.layout.lock(|l| l.event(e));
             return;
         };
 
+        // "Tick" the layout so that it gets to a consistent state, then read the keycodes into
+        // a Keyboard HID Report.
         let report: key_code::KbHidReport = c.shared.layout.lock(|l| {
             l.tick();
             l.keycodes().collect()
         });
-        // if Some(report.as_bytes()) != c.shared.last_report.as_ref().map(|b| &b[..]) {
-        //     let mut buf = [0u8; 128];
-        //     let _ = write!(
-        //         Wrapper::new(&mut buf),
-        //         "o:{:?}\nn:{:?}\n",
-        //         c.shared.last_report,
-        //         report
-        //     );
-        //     serial.lock(|s| {
-        //         let _ = s.write(&buf);
-        //     });
 
-        //     match c.shared.last_report.as_mut() {
-        //         Some(l) => l.clone_from_slice(report.as_bytes()),
-        //         None => {
-        //             let mut l = [0u8; 8];
-        //             l.clone_from_slice(report.as_bytes());
-        //             *c.shared.last_report = Some(l);
-        //         }
-        //     }
-        // }
+        // Set the keyboard report on the usb class.
         if !c
             .shared
             .usb_class
@@ -360,9 +330,13 @@ mod app {
         {
             return;
         }
+
+        // If the device is not configured yet, we need to bail out.
         if c.shared.usb_dev.lock(|d| d.state()) != UsbDeviceState::Configured {
             return;
         }
+
+        // Watchdog will prevent the keyboard from getting stuck in this loop.
         while let Ok(0) = c.shared.usb_class.lock(|k| k.write(report.as_bytes())) {}
     }
 
@@ -374,13 +348,17 @@ mod app {
     fn scan_timer_irq(c: scan_timer_irq::Context) {
         let timer = c.shared.timer;
         let alarm = c.shared.alarm;
+
+        // Immediately clear the interrupt and schedule the next scan alarm.
         (timer, alarm).lock(|t, a| {
             a.clear_interrupt(t);
             let _ = a.schedule(SCAN_TIME_US.microseconds());
         });
 
+        // Feed the watchdog so it knows we haven't frozen/crashed.
         c.shared.watchdog.feed();
 
+        // Get debounced, pressed keys.
         let matrix = c.shared.matrix;
         let keys_pressed = matrix.get().unwrap();
         let deb_events = c
@@ -389,12 +367,15 @@ mod app {
             .events(keys_pressed)
             .map(c.shared.transform);
 
+        // If we're on the right side of the keyboard, just send the events to the event handler
+        // so they can be sent over USB.
         if *c.shared.is_right {
             for event in deb_events {
                 handle_event::spawn(Some(event)).unwrap();
             }
             handle_event::spawn(None).unwrap();
         } /* else {
+              // TODO:Implement handling for the left half of the keyboard once it's physically built
               // coordinate and press/release is encoded in a single byte
               // the first 6 bits are the coordinate and therefore cannot go past 63
               // The last bit is to signify if it is the last byte to be sent, but

@@ -1,3 +1,8 @@
+//! A modified version of ws2812-pio's Ws2812 struct. This one does not take
+//! a [Timer] to construct a [Ws2812], but instead requests a [Timer] when
+//! building its [Writer] struct. This minimizes the borrow on the Timer struct,
+//! allowing it to be used in an rtic app.
+
 #![allow(dead_code)]
 
 use adafruit_kb2040 as bsp;
