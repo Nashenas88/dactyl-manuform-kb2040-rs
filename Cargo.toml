@@ -17,7 +17,7 @@ defmt-rtt = "0.3.1"
 panic-halt = "0.2.0"
 
 usb-device= "0.2.8"
-usbd-serial = { version = "0.1.1", optional = true }
+usbd-serial = "0.1.1"
 usbd-hid = "0.5.0"
 
 # Led support
@@ -35,7 +35,7 @@ adafruit-kb2040 = { git = "https://github.com/rp-rs/rp-hal", rev = "c180e7867b94
 keyberon = { git = "https://github.com/TeXitoi/keyberon", rev = "58ac73cfcd09659bf31ee405ff9f5e23b0edc527" }
 
 [features]
-serial-comms = ["usbd-serial"]
+left-kb = []
 
 # cargo build/run
 [profile.dev]
