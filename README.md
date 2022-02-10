@@ -1,11 +1,19 @@
 # Dactyl Manuform firmware for Adafruit kb2040 in Rust
 
+![](dactyl-manuform-keyberon-kb2040-rs.jpg)
+
 `elf2uf2-rs` is configured as the default runner, since the kb2040 does not expose any debugging
 pins on the rp2040.
 
-With the kb2040 in boot mode (hold BOOT button, press RESET button, then release BOOT button)
+To flash the right half:
+* With the kb2040 in boot mode: (hold BOOT button, press RESET button, then release BOOT button)
 ```sh
 cargo run --release
+```
+To flash the left half:
+* With the kb2040 in boot mode:
+```sh
+cargo run --release --features=left-kb
 ```
 
 <!-- TABLE OF CONTENTS -->
