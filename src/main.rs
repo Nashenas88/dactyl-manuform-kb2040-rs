@@ -6,6 +6,7 @@
 #![allow(dead_code)]
 
 use crate::fmt::Wrapper;
+use crate::layout::CustomAction;
 use crate::ws2812::Ws2812;
 use adafruit_kb2040 as bsp;
 use bsp::hal::clocks::init_clocks_and_plls;
@@ -98,7 +99,7 @@ mod app {
         ws: ws2812::Ws2812,
         #[lock_free]
         matrix: matrix::Matrix<DynPin, DynPin, NCOLS, NROWS>,
-        layout: Layout,
+        layout: Layout<CustomAction>,
         #[lock_free]
         debouncer: Debouncer<PressedKeys<NCOLS, NROWS>>,
         transform: fn(keyberon::layout::Event) -> keyberon::layout::Event,
@@ -212,7 +213,7 @@ mod app {
             .unwrap();
 
         // Load the defined layout which is used later to map the matrix to specific keycodes.
-        let layout = Layout::new(layout::LAYERS);
+        let layout = Layout::<CustomAction>::new(layout::LAYERS);
         // The debouncer prevents very tiny bounces from being registered as multiple switch
         // presses.
         let debouncer: keyberon::debounce::Debouncer<keyberon::matrix::PressedKeys<NCOLS, NROWS>> =

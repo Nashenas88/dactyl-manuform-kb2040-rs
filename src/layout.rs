@@ -1,7 +1,16 @@
 use keyberon::{
-    action::{self, Action, HoldTapConfig},
-    key_code::KeyCode,
+    action::{self, d, k, l, m, HoldTapConfig},
+    key_code::KeyCode::*,
 };
+
+pub enum CustomAction {
+    BootReset,
+    // QwertyLedMode,
+    // ColemakLedMode,
+    // SymbolLedMode,
+}
+
+pub(crate) type Action = action::Action<CustomAction>;
 
 const fn make_holdtap(hold: &'static Action, tap: &'static Action) -> Action {
     make_holdtap_with_timeout(hold, tap, 300)
@@ -21,61 +30,51 @@ const fn make_holdtap_with_timeout(
     }
 }
 
+const UF2: Action = action::Action::Custom(CustomAction::BootReset);
+
 // Colemak DH
-const COLEMAK: Action = action::d(0);
-const QWERTY: Action = action::d(1);
-const NUM_PAD: Action = action::l(2);
-const NAV: Action = action::l(3);
-const SYM: Action = action::d(4);
+const COLEMAK: Action = d(0);
+const QWERTY: Action = d(1);
+const NUM_PAD: Action = l(2);
+const NAV: Action = l(3);
+const SYM: Action = d(4);
 
 // Colemak DH Hold-Tap configs.
-const CTRL_A: Action = make_holdtap(&action::k(KeyCode::LCtrl), &action::k(KeyCode::A));
-const SHIFT_R: Action = make_holdtap(&action::k(KeyCode::LShift), &action::k(KeyCode::R));
-const ALT_S: Action = make_holdtap(&action::k(KeyCode::LAlt), &action::k(KeyCode::S));
-const GUI_T: Action = make_holdtap(&action::k(KeyCode::LGui), &action::k(KeyCode::T));
+const CTRL_A: Action = make_holdtap(&k(LCtrl), &k(A));
+const SHIFT_R: Action = make_holdtap(&k(LShift), &k(R));
+const ALT_S: Action = make_holdtap(&k(LAlt), &k(S));
+const GUI_T: Action = make_holdtap(&k(LGui), &k(T));
 
-const CTRL_O: Action = make_holdtap(&action::k(KeyCode::RCtrl), &action::k(KeyCode::O));
-const SHIFT_I: Action = make_holdtap(&action::k(KeyCode::RShift), &action::k(KeyCode::I));
-const ALT_E: Action = make_holdtap(&action::k(KeyCode::RAlt), &action::k(KeyCode::E));
-const GUI_N: Action = make_holdtap(&action::k(KeyCode::RGui), &action::k(KeyCode::N));
+const CTRL_O: Action = make_holdtap(&k(RCtrl), &k(O));
+const SHIFT_I: Action = make_holdtap(&k(RShift), &k(I));
+const ALT_E: Action = make_holdtap(&k(RAlt), &k(E));
+const GUI_N: Action = make_holdtap(&k(RGui), &k(N));
 
 // Qwerty Hold-Tap configs. Shares Ctrl A from Colemak DH config.
-const SHIFT_S: Action = make_holdtap(&action::k(KeyCode::LShift), &action::k(KeyCode::S));
-const ALT_D: Action = make_holdtap(&action::k(KeyCode::LAlt), &action::k(KeyCode::D));
-const GUI_F: Action = make_holdtap(&action::k(KeyCode::LGui), &action::k(KeyCode::F));
+const SHIFT_S: Action = make_holdtap(&k(LShift), &k(S));
+const ALT_D: Action = make_holdtap(&k(LAlt), &k(D));
+const GUI_F: Action = make_holdtap(&k(LGui), &k(F));
 
-const CTRL_SEMI: Action = make_holdtap(&action::k(KeyCode::RCtrl), &action::k(KeyCode::SColon));
-const SHIFT_L: Action = make_holdtap(&action::k(KeyCode::RShift), &action::k(KeyCode::L));
-const ALT_K: Action = make_holdtap(&action::k(KeyCode::RAlt), &action::k(KeyCode::K));
-const GUI_J: Action = make_holdtap(&action::k(KeyCode::RGui), &action::k(KeyCode::J));
+const CTRL_SEMI: Action = make_holdtap(&k(RCtrl), &k(SColon));
+const SHIFT_L: Action = make_holdtap(&k(RShift), &k(L));
+const ALT_K: Action = make_holdtap(&k(RAlt), &k(K));
+const GUI_J: Action = make_holdtap(&k(RGui), &k(J));
 
 // Symbol layer Hold-Tap configs.
-const CTRL_EQ: Action = make_holdtap(&action::k(KeyCode::LCtrl), &action::k(KeyCode::Equal));
-const SFT_US: Action = make_holdtap(
-    &action::k(KeyCode::LShift),
-    &action::m(&[KeyCode::LShift, KeyCode::Minus]),
-);
-const ALT_MIN: Action = make_holdtap(&action::k(KeyCode::LAlt), &action::k(KeyCode::Minus));
-const GUI_PL: Action = make_holdtap(
-    &action::k(KeyCode::LGui),
-    &action::m(&[KeyCode::LShift, KeyCode::Equal]),
-);
-const CTRL_PIPE: Action = make_holdtap(
-    &action::k(KeyCode::RCtrl),
-    &action::m(&[KeyCode::LShift, KeyCode::Bslash]),
-);
-const SFT_RB: Action = make_holdtap(&action::k(KeyCode::RShift), &action::k(KeyCode::RBracket));
-const ALT_LB: Action = make_holdtap(&action::k(KeyCode::RAlt), &action::k(KeyCode::LBracket));
-const GUI_DQ: Action = make_holdtap(
-    &action::k(KeyCode::RGui),
-    &action::m(&[KeyCode::LShift, KeyCode::Bslash]),
-);
+const CTRL_EQ: Action = make_holdtap(&k(LCtrl), &k(Equal));
+const SFT_US: Action = make_holdtap(&k(LShift), &m(&[LShift, Minus]));
+const ALT_MIN: Action = make_holdtap(&k(LAlt), &k(Minus));
+const GUI_PL: Action = make_holdtap(&k(LGui), &m(&[LShift, Equal]));
+const CTRL_PIPE: Action = make_holdtap(&k(RCtrl), &m(&[LShift, Bslash]));
+const SFT_RB: Action = make_holdtap(&k(RShift), &k(RBracket));
+const ALT_LB: Action = make_holdtap(&k(RAlt), &k(LBracket));
+const GUI_DQ: Action = make_holdtap(&k(RGui), &m(&[LShift, Bslash]));
 
-const MU: Action = action::k(KeyCode::VolUp);
-const MD: Action = action::k(KeyCode::VolDown);
-const MP: Action = action::k(KeyCode::MediaPlayPause);
+const MU: Action = k(VolUp);
+const MD: Action = k(VolDown);
+const MP: Action = k(MediaPlayPause);
 
-pub static LAYERS: keyberon::layout::Layers = keyberon::layout::layout! {
+pub(crate) static LAYERS: keyberon::layout::Layers<CustomAction> = keyberon::layout::layout! {
     { // (0) Colemak Dh
         [F1       F2       F3        F4      F5        F6           F7    F8       F9      F10       F11     F12   ]
         [CapsLock 1        2         3       4         5            6     7        8       9         0       =     ]
@@ -113,12 +112,12 @@ pub static LAYERS: keyberon::layout::Layers = keyberon::layout::layout! {
         [n n          t    t      t      t       t t t t n n]
     }
     { // (4) Symbols
-        [n n         n         n         n         n            n     n        n       n         n           n]
-        [n 1         2         3         4         5            6     7        8       9         0           n]
-        [n !         @         #         $         %            ^     &       '('     ')'        *           n]
-        [n {CTRL_EQ} {SFT_US}  {ALT_MIN} {GUI_PL}  n            n    {GUI_DQ} {ALT_LB} {SFT_RB}  {CTRL_PIPE} n]
-        [n n         n         <         >         n            n     Quote   '['     ']'        Bslash      n]
-        [n n         t         t         BSpace    Space        Enter Delete   n       n         n           n]
-        [n n         n         {MP}      {COLEMAK} {NUM_PAD}    {NAV} {QWERTY} {MD}    {MU}      n           n]
+        [{UF2} n         n         n         n         n            n     n        n       n         n           n]
+        [n     1         2         3         4         5            6     7        8       9         0           n]
+        [n     !         @         #         $         %            ^     &       '('     ')'        *           n]
+        [n     {CTRL_EQ} {SFT_US}  {ALT_MIN} {GUI_PL}  n            n    {GUI_DQ} {ALT_LB} {SFT_RB}  {CTRL_PIPE} n]
+        [n     n         n         <         >         n            n     Quote   '['     ']'        Bslash      n]
+        [n     n         t         t         BSpace    Space        Enter Delete   n       n         n           n]
+        [n     n         n         {MP}      {COLEMAK} {NUM_PAD}    {NAV} {QWERTY} {MD}    {MU}      n           n]
     }
 };
