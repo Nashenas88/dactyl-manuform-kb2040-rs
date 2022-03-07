@@ -48,6 +48,8 @@ const IS_RIGHT: bool = true;
 type UartTx = Pin<Gpio0, FunctionUart>;
 type UartRx = Pin<Gpio1, FunctionUart>;
 
+const REBOOT_SIGNAL: u8 = 0b1001_0111;
+
 // Rtic entry point. Uses the kb2040's Peripheral Access API (pac), and uses the
 // PIO0_IRQ_0 interrupt to dispatch to the handlers.
 #[rtic::app(device = bsp::pac, peripherals = true, dispatchers = [PIO0_IRQ_0])]
@@ -182,9 +184,8 @@ mod app {
             )
             .unwrap();
 
-        if is_right {
-            uart.enable_rx_interrupt();
-        }
+        // Right side enables reading to get events, left side enabled reading to get reboot signal.
+        uart.enable_rx_interrupt();
 
         // Build the matrix that will inform which specific combinations of row and col switches
         // are being pressed.
@@ -339,7 +340,7 @@ mod app {
     }
 
     /// Process events for the layout then generate and send the Keyboard HID Report.
-    #[task(priority = 2, capacity = 8, shared = [serial, usb_dev, usb_class, layout])]
+    #[task(priority = 2, capacity = 8, shared = [serial, uart, usb_dev, usb_class, layout])]
     fn handle_event(mut c: handle_event::Context, event: Option<keyberon::layout::Event>) {
         // If there's an event, process it with the layout and return early. We use `None`
         // to signify that the current scan is done with its events.
@@ -351,12 +352,18 @@ mod app {
             });
             c.shared.layout.lock(|l| l.event(e));
             return;
-        };
+        }
 
         // "Tick" the layout so that it gets to a consistent state, then read the keycodes into
         // a Keyboard HID Report.
         let report: key_code::KbHidReport = c.shared.layout.lock(|l| {
-            l.tick();
+            if let keyberon::layout::CustomEvent::Press(CustomAction::BootReset) = l.tick() {
+                // Send the reboot signal to the left side before we reboot ourselves.
+                c.shared
+                    .uart
+                    .lock(|u| u.write_full_blocking(&[REBOOT_SIGNAL]));
+                bsp::hal::rom_data::reset_to_usb_boot(0, 0);
+            }
             l.keycodes().collect()
         });
 
@@ -479,16 +486,23 @@ mod app {
             c.shared.serial.lock(|s| write_serial(s, message));
             return;
         }
-        let [d] = data;
-        let i = (d & ROW_BIT_MASK) >> ROW_SHIFT;
-        let j = (d & COL_BIT_MASK) >> COL_SHIFT;
-        let is_pressed = (d & PRESSED_BIT_MASK) > 0;
+        if IS_RIGHT {
+            let [d] = data;
+            let i = (d & ROW_BIT_MASK) >> ROW_SHIFT;
+            let j = (d & COL_BIT_MASK) >> COL_SHIFT;
+            let is_pressed = (d & PRESSED_BIT_MASK) > 0;
 
-        handle_event::spawn(Some(if is_pressed {
-            Event::Press(i, j)
+            handle_event::spawn(Some(if is_pressed {
+                Event::Press(i, j)
+            } else {
+                Event::Release(i, j)
+            }))
+            .unwrap();
         } else {
-            Event::Release(i, j)
-        }))
-        .unwrap();
+            let [d] = data;
+            if d == REBOOT_SIGNAL {
+                bsp::hal::rom_data::reset_to_usb_boot(0, 0);
+            }
+        }
     }
 }
