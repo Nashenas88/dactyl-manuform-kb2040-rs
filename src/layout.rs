@@ -49,13 +49,13 @@ pub(crate) static LAYERS: keyberon::layout::Layers<CustomAction> = keyberon::lay
         [ n        n     n      n         n        n        n  n         n         n      n     n      ]
     }
     { // (3) Numpad
-        [t t t  t    t     t       t       t       t       t          t       t     ]
-        [t t t  t    t     t       t       NumLock KpSlash KpAsterisk t       t     ]
-        [t t t  t    t     t       t       Kp7     Kp8     Kp9        KpMinus t     ]
-        [t t t  t    t     t       t       Kp4     Kp5     Kp6        KpPlus  t     ]
-        [t t t  t    t     t       t       Kp1     Kp2     Kp3        KpEnter RShift]
-        [n n t  t    t     t       KpEnter Kp0     Kp0     KpDot      n       n     ]
-        [n n t {SYM} LGui {LAYER} {LAYER}  RGui   {SYM}    t          n       n     ]
+        [t      t t     t     t      t         t       t       t       t          t       t     ]
+        [t      t t     t     t      t         t       NumLock KpSlash KpAsterisk t       t     ]
+        [t      t t     t     t      t         t       Kp7     Kp8     Kp9        KpMinus t     ]
+        [t      t t     t     t      t         t       Kp4     Kp5     Kp6        KpPlus  t     ]
+        [LShift t t     t     t      t         t       Kp1     Kp2     Kp3        KpEnter RShift]
+        [n      n LCtrl LAlt  BSpace Space     KpEnter Kp0     Kp0     KpDot      n       n     ]
+        [n      n t    {SYM}  LGui  {LAYER}   {LAYER}  RGui   {SYM}    t          n       n     ]
     }
     { // (4) Nav
         [t      t          t     t      t      t        t       t      t    t     t t     ]
