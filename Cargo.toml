@@ -35,7 +35,9 @@ adafruit-kb2040 = { git = "https://github.com/rp-rs/rp-hal", rev = "c180e7867b94
 keyberon = { git = "https://github.com/TeXitoi/keyberon", rev = "58ac73cfcd09659bf31ee405ff9f5e23b0edc527" }
 
 [features]
+default = ["home-mods"]
 left-kb = []
+home-mods = []
 
 # cargo build/run
 [profile.dev]
